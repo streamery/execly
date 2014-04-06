@@ -32,6 +32,8 @@ function exec (host, cmd, args, opts) {
   var user = null;
   var pass = null;
   var stdin = null;
+  var buffer = null;
+  var isRemote = false;
 
   opts = opts || {};
 
@@ -47,6 +49,7 @@ function exec (host, cmd, args, opts) {
   }
 
   stream = through(write, end);
+  buffer = [];
 
   // local
   if (isLocal(host)) {
@@ -65,9 +68,12 @@ function exec (host, cmd, args, opts) {
     io.stdout.on('end', function () {
       stream.emit('end');
     });
+
+    stdin = io.stdin;
   }
   // remote
   else {
+    isRemote = true;
     parsed = url.parse(host);
 
     // add `ssh://' protocol and try again
@@ -76,14 +82,15 @@ function exec (host, cmd, args, opts) {
       parsed = url.parse(host);
     }
 
-    auth = parsed.auth.split(':');
-    user = auth.shift();
-    pass = auth.shift();
+    try {
+      auth = parsed.auth.split(':');
+      user = auth.shift();
+      pass = auth.shift();
+    } catch (e) { }
 
     (con = ssh())
     .on('ready', function () {
       var c = [cmd].concat(args).join(' ');
-      console.log(opts.env)
       con.exec(c, {env: opts.env}, function (err, duplex) {
         if (err) { return console.error(err); }
 
@@ -95,6 +102,8 @@ function exec (host, cmd, args, opts) {
           stream.emit('end', err);
         });
 
+        buffer.forEach(stdin.write.bind(stdin));
+        buffer = [];
       });
     })
     .on('error', function (err) {
@@ -120,6 +129,8 @@ function exec (host, cmd, args, opts) {
 
   function write (chunk) {
     if (stdin) { stdin.write(chunk); }
+    else if (false == isRemote) { this.push(chunk); }
+    else { buffer.push(chunk); }
   }
 
   function end () { }
